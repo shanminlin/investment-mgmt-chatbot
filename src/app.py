@@ -32,13 +32,23 @@ if "process_example" not in st.session_state:
 def get_openai_client():
     api_key = None
 
-    # Fall back to environment variable
+    # First try to get from Streamlit secrets
+    try:
+        api_key = st.secrets["OPENAI_API_KEY"]
+    except (KeyError, FileNotFoundError):
+        pass
+
+    # If not found in secrets, try environment variable
+    if not api_key:
+        api_key = os.environ.get("OPENAI_API_KEY")
+
+    # If not found in environment, try config
     if not api_key:
         api_key = config.OPENAI_API_KEY
 
     # Check if we have a key
     if not api_key:
-        st.error("OpenAI API key not found. Please set it in .streamlit/secrets.toml or as an environment variable.")
+        st.error("OpenAI API key not found. Please set it in Streamlit secrets, as an environment variable, or in your config file.")
         st.stop()
 
     return openai.OpenAI(api_key=api_key)
