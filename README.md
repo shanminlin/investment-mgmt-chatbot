@@ -8,3 +8,6 @@ A Retrieval-Augmented Generation (RAG) chatbot for investment management
 - Citation display for information sources
 - Conversation logging for compliance and improvement
 - Hybrid search combining semantic and keyword approaches
+
+## Live Demo
+https://investment-mgmt-chatbot.streamlit.app/
