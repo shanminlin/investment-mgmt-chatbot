@@ -24,20 +24,24 @@ if "messages" not in st.session_state:
 if "conversation_id" not in st.session_state:
     st.session_state.conversation_id = str(uuid.uuid4())
 
+# Add a new session state variable to track if we need to process an example question
+if "process_example" not in st.session_state:
+    st.session_state.process_example = False
+
 # Function to setup OpenAI client
 def get_openai_client():
-    # For Streamlit Cloud, use st.secrets
-    if hasattr(st, "secrets") and "OPENAI_API_KEY" in st.secrets:
-        openai_api_key = st.secrets["OPENAI_API_KEY"]
-    # For local development, use environment variables
-    else:
-        openai_api_key = config.OPENAI_API_KEY
+    api_key = None
 
-    if not openai_api_key:
-        st.error("OpenAI API key is not set. Please set it in your .env file or Streamlit secrets.")
+    # Fall back to environment variable
+    if not api_key:
+        api_key = config.OPENAI_API_KEY
+
+    # Check if we have a key
+    if not api_key:
+        st.error("OpenAI API key not found. Please set it in .streamlit/secrets.toml or as an environment variable.")
         st.stop()
 
-    return openai.OpenAI(api_key=openai_api_key)
+    return openai.OpenAI(api_key=api_key)
 
 # Function to log conversation
 def log_conversation(user_query, bot_response):
@@ -80,6 +84,32 @@ def format_response_with_citations(response):
 
     return formatted_text
 
+# Function to process user input (both typed and example questions)
+def process_user_input(prompt):
+    # Add user message to chat history
+    st.session_state.messages.append({"role": "user", "content": prompt})
+
+    # Display user message
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # Prepare messages for API call (including system message)
+    api_messages = [
+        {"role": "system", "content": config.SYSTEM_MESSAGE}
+    ] + st.session_state.messages
+
+    # Generate and display response
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking..."):
+            response = generate_response(api_messages)
+            st.markdown(format_response_with_citations(response))
+
+    # Add assistant response to chat history
+    st.session_state.messages.append({"role": "assistant", "content": response})
+
+    # Log the conversation
+    log_conversation(prompt, response)
+
 # App layout
 def create_ui():
     # App header
@@ -94,31 +124,37 @@ def create_ui():
             else:
                 st.markdown(message["content"])
 
+    # Process example question if flag is set
+    if st.session_state.process_example:
+        # Get the last user message (which should be the example question)
+        last_user_message = next((msg["content"] for msg in reversed(st.session_state.messages)
+                              if msg["role"] == "user"), None)
+
+        if last_user_message:
+            # Prepare messages for API call (including system message)
+            api_messages = [
+                {"role": "system", "content": config.SYSTEM_MESSAGE}
+            ] + st.session_state.messages[:-1]  # Exclude the last user message as we'll add it separately
+
+            # Generate and display response
+            with st.chat_message("assistant"):
+                with st.spinner("Thinking..."):
+                    response = generate_response(api_messages + [{"role": "user", "content": last_user_message}])
+                    st.markdown(format_response_with_citations(response))
+
+            # Add assistant response to chat history
+            st.session_state.messages.append({"role": "assistant", "content": response})
+
+            # Log the conversation
+            log_conversation(last_user_message, response)
+
+        # Reset the flag
+        st.session_state.process_example = False
+        st.rerun()
+
     # Chat input
     if prompt := st.chat_input("Ask me about investment management..."):
-        # Add user message to chat history
-        st.session_state.messages.append({"role": "user", "content": prompt})
-
-        # Display user message
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
-        # Prepare messages for API call (including system message)
-        api_messages = [
-            {"role": "system", "content": config.SYSTEM_MESSAGE}
-        ] + st.session_state.messages
-
-        # Generate and display response
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                response = generate_response(api_messages)
-                st.markdown(format_response_with_citations(response))
-
-        # Add assistant response to chat history
-        st.session_state.messages.append({"role": "assistant", "content": response})
-
-        # Log the conversation
-        log_conversation(prompt, response)
+        process_user_input(prompt)
 
 # Add a sidebar with information and example questions
 def create_sidebar():
@@ -138,7 +174,11 @@ def create_sidebar():
         st.markdown("## Example Questions")
         for question in config.EXAMPLE_QUESTIONS:
             if st.button(question, key=f"btn_{question[:20]}"):
+                # Add the example question to messages
                 st.session_state.messages.append({"role": "user", "content": question})
+                # Set the flag to process this example on next rerun
+                st.session_state.process_example = True
+                st.rerun()
 
         # Add a clear button to reset the conversation
         st.markdown("## Options")
